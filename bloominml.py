@@ -3,6 +3,8 @@ from pybloom import BloomFilter
 from time import time
 from numpy import inf
 
+#You could use one filter for each class, which might allow you to do some interesting things...
+
 class BloomFreqMap:
 	def __init__(self, initial_capacity=5000, initial_error_rate=0.0001):
 		self.bf = BloomFilter(capacity=initial_capacity, error_rate=initial_error_rate)
