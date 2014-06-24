@@ -181,26 +181,31 @@ class BloomMultinomiamNaiveBayes:
 	def predict(self, tokens, tie_breaker='highest_freq', use_class_prior=True):
 			
 		max_class, max_score = None, -inf
-		tok_freqs = tokensmakeTokenFreqmap(tokens)
+		tok_freqs = self.makeTokenFreqmap(tokens)
 		num_instances = sum((item[1] for item in self.class_freqs.iteritems()))
 		vocab_size = len(self.token_type_bf)
-		for class_label in self.class_freqs:
-			this_score = 1.0
-			prob_c = 1.*self.class_freqs[class_label] / num_instances
-			
+		for class_label, class_freq in self.class_freqs.iteritems():
+#			print class_label
+			this_score = 0.0
+#			print 'prob_c', prob_c
 			tok_count_c = self.tokens_per_class[class_label]
-			for token, freq in tok_freqs:
-				key = token + '_' + str(class_label)
-				count_in_c = self.class_conditional_counts.count(key)
-				theta_t_c = 1.*(count_in_c + self.alpha) / (tok_count_c + vocab_size)
-				this_score *= theta_t_c
+			for token, freq in tok_freqs.iteritems():
+				count_in_c = self.class_conditional_counts[class_label].count(token)
+				if count_in_c == 0:
+					continue
+				this_score += freq*(log(count_in_c + self.alpha) - log(tok_count_c + vocab_size))
+#				print class_label, token, theta_t_c
 			
 			#Penalize unseen tokens
 			#unseen = len(self.class_to_toks_bf[class_label]) - len(tok_freqs)
-			#if use_class_prior:
-			#	this_score *= prob_c
+			if use_class_prior:
+				this_score += log(class_freq) - log(num_instances)
+			
+			if this_score > max_score:
+				max_score = this_score
+				max_class = class_label
 		
-		return max_class
+		return max_class, max_score
 		
 def test_bfm():
 	print 'Testing bfm'
@@ -243,10 +248,11 @@ def test_nb():
 		training_time += t1-t0
 
 	print 'Took', training_time, 'to train'
-	def pred():
+	while True:
 		i = int(raw_input())
-		clf.predict(findall('[A-Za-z]{3,}', open(full_filenames).read()))
-	interact(local=locals())
+		print full_filenames[i]
+		print clf.predict(findall('[A-Za-z]{3,}', open(full_filenames[i]).read()))
+	#interact(local=locals())
 	print 'Done'
 	
 if __name__ == '__main__':
