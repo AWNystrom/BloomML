@@ -4,7 +4,8 @@
 #Needs this: https://github.com/jaybaird/python-bloomfilter
 #from pybloom import BloomFilter
 from time import time
-from numpy import inf
+from numpy import inf, log
+from code import interact
 
 #Needs https://github.com/axiak/pybloomfiltermmap
 #10X faster!
@@ -20,13 +21,15 @@ class Cache:
 		print 'Yo yo yo', item
 
 class BloomFreqMap:
-	def __init__(self, initial_capacity=5000, initial_error_rate=0.0001):
+	def __init__(self, initial_capacity=500000, initial_error_rate=0.0001):
 		self.initial_capacity = initial_capacity
 		self.initial_error_rate = initial_error_rate
 		self.bf = BloomFilter(capacity=initial_capacity, error_rate=initial_error_rate)
 		self.bin_search_cutoff = self.determine_lookup_speed_threshold()
 		
 		self.binsearch_bf = BloomFilter(capacity=initial_capacity, error_rate=initial_error_rate)
+		
+		self.actual_counts = {} #For testing
 	
 	def linear_scan_count(self, item, bf=None):
 		if bf is None:
@@ -47,10 +50,8 @@ class BloomFreqMap:
 			c *= 2
 		upper = c
 		lower = c/2
-		print 'upper, lower', upper, lower
 		while True:
 			mid = lower + (upper-lower)/2
-			print 'Mid', mid
 			if item+'_'+str(mid) in bf and item+'_'+str(mid+1) not in bf:
 				return mid
 			#Which side to follow?
@@ -67,21 +68,42 @@ class BloomFreqMap:
 		#If so, use that method. Else use a linear scan.
 		if item in self.binsearch_bf:
 			return self.binsearch_count(item, bf=bf)
-		return self.linear_scan_search(item, bf=bf)
+		return self.linear_scan_count(item, bf=bf)
+	
+	def increment_to(self, item, to):
+	
+		cur_count = self.binsearch_count(item) if self.binsearch_bf else self.linear_scan_count(item)
 		
-	def increment(self, item, binsearch=False):
+		if cur_count >= to:
+			return
+		
+		if to >= self.bin_search_cutoff:
+			self.binsearch_bf.add(item)
+		
+		by = to-cur_count
+		if by <= 0:
+			return
+		
+		self.increment(item, by=by)
+		
+	def increment(self, item, by=1):
 		"""
-		If binsearch is true, the count of an item is found via a binary search.
-		If it's false, a linear scan is used from 1 to n. The former is more efficient for
-		large counts, the latter for small.
+		Increment the frequency of item by the amount "by" (default 1).
 		"""
-		cur_count = self.binsearch_count(item) if binsearch else self.linear_scan_count(item)
+		
+		cur_count = self.binsearch_count(item) if item in self.binsearch_bf else self.linear_scan_count(item)
+		
+#		self.actual_counts[item] = self.actual_counts.get(item, 0) + by
 		
 		if cur_count+1 == self.bin_search_cutoff:
 			self.binsearch_bf.add(item)
-			
-		self.bf.add(item + '_'+ str(cur_count+1))
 		
+		try:
+			for i in xrange(cur_count+1, cur_count+by+1):
+				self.bf.add(item + '_'+ str(i))
+		except:
+			interact(local=locals())
+				
 	def determine_lookup_speed_threshold(self):
 		from time import time
 		#do each one 5 times
@@ -90,23 +112,16 @@ class BloomFreqMap:
 		repetitions = 5
 		while True:
 			bf.add('andrew_' + str(count))
-		
 			bin_faster_count = 0
-			print 'Trying for', count
 			for j in xrange(repetitions):
-				print 'j =', j
 				#Linear scan
 				t1 = time()
-				print 'Starting scan'
 				self.linear_scan_count('andrew', bf)
-				print 'Done with scan'
 				t2 = time()
 				linear_time = t2-t1
 			
 				t1 = time()
-				print 'Starting bin search'
 				self.binsearch_count('andrew', bf)
-				print 'Ending bin search'
 				t2 = time()
 				bin_time = t2-t1
 			
@@ -118,51 +133,121 @@ class BloomFreqMap:
 			count += 1
 
 class BloomMultinomiamNaiveBayes:
-	def __init__(self, alpha):
+	def __init__(self, alpha, initial_capacity, error_rate):
+		self.initial_capacity = initial_capacity
+		self.error_rate = error_rate
 		self.alpha = alpha
-		self.bfm = BloomFreqMap()
+		
+		#Tracks count | class for p(x|c)
+		self.class_conditional_counts = {}#BloomFreqMap()
+		
+		#Tracks count all tokens | class for p(x|c)
+		self.tokens_per_class = {}
+		
+		#Tracks count(class) for p(c)
 		self.class_freqs = {}
-		self.token_type_counting_bf = BloomFilter(capacity=initial_capacity, error_rate=initial_error_rate)
+		
+		#Counts vocab size for smoothing
+		self.token_type_bf = BloomFilter(capacity=initial_capacity, error_rate=error_rate)
+		
+		#Tracks the tokens in each class so that we can penalize unseen tokens
+		#self.class_to_toks_bf = {}
+	
+	def makeTokenFreqmap(self, tokens):
+		f = {}
+		get = f.get
+		for token in tokens:
+			f[token] = get(token, 0) + 1
+		return f
 		
 	def fit(self, tokens, class_label):
-		for token in tokens:
-			token_type_counting_bf.add(token)
-			key = token + '_' + str(class_label)
-			self.bfm.increment(key)
+		#if class_label not in self.class_to_toks_bf:
+		#	self.class_to_toks_bf[class_label] = BloomFilter(capacity=self.initial_capacity, error_rate=self.error_rate)
+		
+		if class_label not in self.class_conditional_counts:
+			self.class_conditional_counts[class_label] = BloomFreqMap(initial_capacity=self.initial_capacity, initial_error_rate=self.error_rate)
+			
+		self.tokens_per_class[class_label] = self.tokens_per_class.get(class_label, 0) + len(tokens)
+		tok_freqs = self.makeTokenFreqmap(tokens)
+		conditional_counts_bf = self.class_conditional_counts[class_label]
+		
+		for token, token_freq in tok_freqs.iteritems():
+			#self.class_to_toks_bf[class_label].add(token)
+			self.token_type_bf.add(token)
+			conditional_counts_bf.increment(token, by=token_freq)
+			
 		self.class_freqs[class_label] = self.class_freqs.get(class_label, 0) + 1
 	
-	def predict(self, tokens):
-		token_freqmap = {}
-		for token in tokens:
-			token_freqmap[token] = token_freqmap.get(token, 0.) + 1
+	def predict(self, tokens, tie_breaker='highest_freq', use_class_prior=True):
 			
 		max_class, max_score = None, -inf
+		tok_freqs = tokensmakeTokenFreqmap(tokens)
+		num_instances = sum((item[1] for item in self.class_freqs.iteritems()))
+		vocab_size = len(self.token_type_bf)
 		for class_label in self.class_freqs:
 			this_score = 1.0
-			this_class_freq = self.class_freqs[class_label]
-			for token in token_freqmap:
+			prob_c = 1.*self.class_freqs[class_label] / num_instances
+			
+			tok_count_c = self.tokens_per_class[class_label]
+			for token, freq in tok_freqs:
 				key = token + '_' + str(class_label)
-				token_freq_in_class = 1.*self.bfm.count(key)
-				this_score *= token_freq_in_class / this_class_freq
-				
-			#Now penalize for all unseen tokens
-			u = len() - len()#unseen count
-			this_score /= self.alpha**u/this_class_freq**u
-			if this_score > max_score:
-				max_score = this_score
-				max_class = class_label
+				count_in_c = self.class_conditional_counts.count(key)
+				theta_t_c = 1.*(count_in_c + self.alpha) / (tok_count_c + vocab_size)
+				this_score *= theta_t_c
+			
+			#Penalize unseen tokens
+			#unseen = len(self.class_to_toks_bf[class_label]) - len(tok_freqs)
+			#if use_class_prior:
+			#	this_score *= prob_c
+		
 		return max_class
-				
-if __name__ == '__main__':
+		
+def test_bfm():
+	print 'Testing bfm'
 	bfm = BloomFreqMap()
-	x = bfm.
-	print 'At', x, 'binsearch_count becomes faster'
-	from sys import exit
-	exit(0)
-	print bfm.binsearch_count('andrew')
-	t1 = time()
-	for i in xrange(2000):
+	print bfm.count('andrew')
+	for i in xrange(200):
 		bfm.increment('andrew')
-	print bfm.binsearch_count('andrew')
-	t2 = time()
-	print t2-t1
+		assert bfm.count('andrew') == i+1
+	print bfm.count('andrew')
+	bfm.increment_to('andrew', 9001)
+	print bfm.count('andrew')
+	bfm.increment('andrew', 90)
+	print bfm.count('andrew')
+	print 'Done'
+	
+def test_nb():
+	from os import walk
+	print 'Testing nb'
+	clf = BloomMultinomiamNaiveBayes(0.01, 500000, 0.0001)
+	
+	full_filenames = []
+	#Get filenames
+	for root, dirs, files in walk('data/20news-18828/'):
+		for filename in files:
+			full_filenames.append(root + '/' + filename)
+	print len(full_filenames)
+	
+	from random import shuffle
+	shuffle(full_filenames)
+	from re import findall
+
+	training_time = 0	
+	for filename in full_filenames:
+		toks = findall('[A-Za-z]{3,}', open(filename).read())
+		class_label = filename.rsplit('/', 2)[1]
+		
+		t0 = time()
+		clf.fit(toks, class_label)
+		t1 = time()
+		training_time += t1-t0
+
+	print 'Took', training_time, 'to train'
+	def pred():
+		i = int(raw_input())
+		clf.predict(findall('[A-Za-z]{3,}', open(full_filenames).read()))
+	interact(local=locals())
+	print 'Done'
+	
+if __name__ == '__main__':
+	test_nb()
