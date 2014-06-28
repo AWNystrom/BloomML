@@ -1,7 +1,9 @@
 class Node:
 	def __init__(self, data):
 		self.data = data
-
+		self.next = None
+		self.prev = None
+		
 class DoublyLinkedList:
 	def __init__(self):
 		self.head = None
@@ -96,26 +98,25 @@ class LRUCache:
 		self.ht = {}
 		self.ll = DoublyLinkedList()
 		
-	def lookup(self, item, plab_b_func):
+	def lookup(self, item, plan_b_func):
 		#If the item is in the cache, move it to the front of the linked list
 		#then return it. If it's not in the cache, remove the last item in the
 		#linked list, queries the plan_b_func for the result, adds it to the 
 		#cache, and returns it. This should be a decorator.
 		
-		node = self.ht.get(item, False)
-		if item is False:
-			result = blan_b_func(item)
+		if item not in self.ht:
+			result = plan_b_func(item)
 			if len(self.ht) == self.max_size:
 				del self.ht[self.ll.tail.data]
 				self.ll.removeTail()
 			node = Node(result)
-			self.ht = node
+			self.ht[item] = node
 			self.ll.addToHead(node)
 			return result
 		else:
 			#The item was in the cache. Move it to the front of 
 			#the linked list.
-			self.ll.moveToHead(node)
+			node = self.ht[item]
 			return node.data
 				
 def test_linked_list():
