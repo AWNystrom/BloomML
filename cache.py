@@ -1,3 +1,5 @@
+from code import interact
+
 class Node:
 	def __init__(self, data):
 		self.data = data
@@ -46,6 +48,7 @@ class DoublyLinkedList:
 			self.head = None
 			self.tail = None
 		del temp
+		self.size -= 1
 		
 	def moveToHead(self, node):
 		"""
@@ -73,6 +76,7 @@ class DoublyLinkedList:
 		
 	def __repr__(self):
 		l = []
+		print 'printing'
 		temp = self.head
 		while temp is not None:
 			l.append(temp.data)
@@ -103,22 +107,31 @@ class LRUCache:
 		#then return it. If it's not in the cache, remove the last item in the
 		#linked list, queries the plan_b_func for the result, adds it to the 
 		#cache, and returns it. This should be a decorator.
-		
+		#interact(local=locals()) 
+		#data is the count, item is the token
 		if item not in self.ht:
 			result = plan_b_func(item)
 			if len(self.ht) == self.max_size:
-				del self.ht[self.ll.tail.data]
+				del self.ht[self.ll.tail.item]
 				self.ll.removeTail()
-			node = Node(result)
-			self.ht[item] = node
-			self.ll.addToHead(node)
-			return result
+			self.ll.addToHead(result)
+			self.ll.head.item = item
+			self.ht[item] = self.ll.head
 		else:
 			#The item was in the cache. Move it to the front of 
 			#the linked list.
 			node = self.ht[item]
-			return node.data
-				
+			result = node.data
+		
+		return result
+	
+	def update(self, item, func):
+		if item not in self.ht:
+			return
+		
+		node = self.ht[item]
+		node.data = func(node.data)
+		
 def test_linked_list():
 	l = DoublyLinkedList()
 	print l
@@ -147,20 +160,24 @@ def test_linked_list():
 def test_cache():
 	def calculate(i):
 		from time import sleep
-		sleep(1)
+		sleep(3)
 		return i**2
 		
 	cache = LRUCache(5)
-	
+	interact(local=locals())
 	print 'Here?'
+	print cache.ll
 	cache.lookup(5, calculate)
 	print 'Here?'
 	cache.lookup(5, calculate)
+	print cache.ll
 	
 	print 'Here?'
 	cache.lookup(6, calculate)
+	print cache.ll
 	print 'Here?'
 	cache.lookup(6, calculate)
+	print cache.ll
 
 if __name__ == '__main__':
 	test_cache()

@@ -112,11 +112,10 @@ class TextToId:
 def test_nb():
 	from os import walk
 	print 'Testing nb'
-	clf = MultinomiamNaiveBayes(0.5, 500000000, 0.0001)
 	
 	full_filenames = []
 	#Get filenames
-	for root, dirs, files in walk('data/20news-18828/'):
+	for root, dirs, files in walk('data/smaller'):
 		for filename in files:
 			full_filenames.append(root + '/' + filename)
 	print len(full_filenames)
@@ -127,28 +126,49 @@ def test_nb():
 
 	training_time = 0
 	labels = []
+	docs = []
 	for filename in full_filenames:
-		print 'Fitting', filename
-		toks = findall('[A-Za-z]{3,}', open(filename).read())
-		class_label = filename.rsplit('/', 2)[1]
-		labels.append(class_label)
-		
-		t0 = time()
-		clf.fit(toks, class_label)
-		t1 = time()
-		training_time += t1-t0
+		docs.append(findall('[A-Za-z]{3,}', open(filename).read()))
+		labels.append(filename.rsplit('/', 2)[1])
 	
-	#In-sample test error
-	from sklearn.preprocessing import LabelEncoder
+	#Do some CV
+	from sklearn.cross_validation import StratifiedKFold
+	from numpy import array
+	from random import shuffle
+	
+	print 'Let us cross validate'
 	le = TextToId()
-	pred = []
-	for filename in full_filenames:
-		print 'Predicting', filename
-		guess, score = clf.predict(findall('[A-Za-z]{3,}', open(filename).read()))
-		pred.append(guess)
-	le.fit(labels)
 	
-	print f1_score(le.transform(labels), le.transform(pred), pos_label=None, average='macro')
+	Y = le.fit_transform(labels)
+	docs = array(docs)
+	Y = array(Y)
+	inds = range(Y.shape[0])
+	shuffle(inds)
+	docs = docs[inds]
+	Y = Y[inds]
+	cv = StratifiedKFold(Y, shuffle=True)
+	
+	scores = []
+	total_trained = 0
+	for train, test in cv:
+		X_train, X_test = X[train], X[test]
+		Y_train, Y_test = Y[train], Y[test]
+		
+		total_trained += X_train.shape[0]
+		clf = MultinomiamNaiveBayes(0.5, 500000, 0.001)
+		for x, y in zip(X_train, X_train):
+			t0 = time()
+			clf.fit(x, y)
+			t1 = time()
+			training_time += t1-t0
+		pred = [clf.predict(x) for x in X_train]
+		scores.append(f1_score(Y_test, pred, pos_label=None, average='macro'))
+		print scores[-1]
+	scores = array(scores)
+	print 'Average macro F1:', scores.mean()
+	print 'Standard deviation across folds:', scores.std()
+	print 'Total trained:', total_trained	
+	print 'Training time:', training_time
 	print 'Done'
 
 if __name__ == '__main__':
