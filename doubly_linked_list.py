@@ -5,10 +5,15 @@ class Node:
 		self.prev = None
 		
 class DoublyLinkedList:
-	def __init__(self):
+	def __init__(self, iterable=None):
 		self.head = None
 		self.tail = None
 		self.size = 0
+		
+		if iterable is not None:
+			for i in iterable:
+				self.addToTail(i)
+				
 	def addToTail(self, data):
 		node = Node(data)
 		if self.tail is None:
@@ -72,6 +77,19 @@ class DoublyLinkedList:
 		node.prev = None
 		self.head = node
 	
+	def copy(self, other_attrs_to_copy=[]):
+		"Make a new linked list whose nodes contain the same data."
+		"Assumes attributes being copied from nodes are immutible."
+		cur = self.head
+		new_dll = DoublyLinkedList()
+		while cur is not None:
+			new_dll.addToTail(cur.data)
+			for attr in other_attrs_to_copy:
+				a = getattr(cur, attr)
+				setattr(new_dll.tail, attr, a)
+			cur = cur.next
+		return new_dll
+	
 	def __iter__(self):
 		cur = self.head
 		while cur is not None:
@@ -88,13 +106,30 @@ class DoublyLinkedList:
 			if a != b:
 				return False
 		return True
+	
+	def __ne__(self, other):
+		return not self.__eq__(other)
 		
 	def __getitem__(self, index):
+		if index >= len(self):
+			raise IndexError("There are only %s items in this list. The index of the item "
+							 "you asked for is %s " % (self.size, index))
 		cur = self.head
 		i = 0
 		while cur is not None:
 			if i == index:
 				return cur.data
+			cur = cur.next
+			i += 1
+		raise IndexError("There are only %s items in this list. The index of the item "
+						 "you asked for is %s " % (self.size, index))
+	
+	def getNodeByIndex(self, index):
+		cur = self.head
+		i = 0
+		while cur is not None:
+			if i == index:
+				return cur
 			cur = cur.next
 			i += 1
 		raise IndexError("There are only %s items in this list. The index of the item "
