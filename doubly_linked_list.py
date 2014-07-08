@@ -134,6 +134,9 @@ class DoublyLinkedList:
 			i += 1
 		raise IndexError("There are only %s items in this list. The index of the item "
 						 "you asked for is %s " % (self.size, index))
+	
+	def __setitem__(self, index, val):
+		self.getNodeByIndex(index).data = val
 				
 	def __repr__(self):
 		return str(list(self))
