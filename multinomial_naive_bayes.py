@@ -3,15 +3,23 @@ from pybloomfilter import BloomFilter
 from time import time
 from numpy import inf, log
 from sklearn.metrics import f1_score
+from code import interact
 
-class MultinomiamNaiveBayes:
-	def __init__(self, alpha, initial_capacity, error_rate):
+def quant_enc(n):
+	return 1.0 + int(log(n, 0.5))
+	
+def quant_dec(n):
+	return (1.5**n + 1.5**(n-1) - 1)/2
+	
+class MultinomiamNaiveBayes(object):
+	def __init__(self, alpha, initial_capacity, error_rate, cache_size):
 		self.initial_capacity = initial_capacity
 		self.error_rate = error_rate
 		self.alpha = alpha
 		
 		#Tracks count | class for p(x|c)
-		self.class_conditional_counts = {}#BloomFreqMap()
+		self.class_conditional_counts = BloomFreqMap(initial_capacity, initial_error_rate,
+													 cache_size, quant_enc, quant_dec)
 		
 		#Tracks count all tokens | class for p(x|c)
 		self.tokens_per_class = {}
@@ -41,17 +49,15 @@ class MultinomiamNaiveBayes:
 		#	self.class_to_toks_bf[class_label] = BloomFilter(capacity=self.initial_capacity, error_rate=self.error_rate)
 		
 		if class_label not in self.class_conditional_counts:
-			self.class_conditional_counts[class_label] = BloomFreqMap(initial_capacity=self.initial_capacity, initial_error_rate=self.error_rate)
 			self.vocab_sizes[class_label] = BloomFilter(capacity=self.initial_capacity, error_rate=self.error_rate)
 			
 		self.tokens_per_class[class_label] = self.tokens_per_class.get(class_label, 0) + len(tokens)
 		tok_freqs = self.makeTokenFreqmap(tokens)
-		conditional_counts_bf = self.class_conditional_counts[class_label]
 		
 		for token, token_freq in tok_freqs.iteritems():
 			#self.class_to_toks_bf[class_label].add(token)
 			self.token_type_bf.add(token)
-			conditional_counts_bf.increment(token, by=token_freq)
+			conditional_counts_bf[token+'_'+class_label] += token_freq
 			self.vocab_sizes[class_label].add(token)
 			
 		self.class_freqs[class_label] = self.class_freqs.get(class_label, 0) + 1
@@ -70,7 +76,7 @@ class MultinomiamNaiveBayes:
 			V = len(self.vocab_sizes[c])
 			theta_denominator = log(f_t_c + V)
 			for token, freq in tok_freqs.iteritems():
-				count_in_c = self.class_conditional_counts[c].count(token)
+				count_in_c = self.class_conditional_counts[token+'_'+c]
 				if count_in_c == 0:
 					num_unseen += freq
 					continue
@@ -83,7 +89,7 @@ class MultinomiamNaiveBayes:
 		
 		return max_class, max_score
 
-class TextToId:
+class TextToId(object):
 	def __init__(self):
 		self.str_to_id = {}
 		self.id_to_str = {}
@@ -129,7 +135,8 @@ def test_nb():
 	docs = []
 	for filename in full_filenames:
 		docs.append(findall('[A-Za-z]{3,}', open(filename).read()))
-		labels.append(filename.rsplit('/', 2)[1])
+		label = filename.rsplit('/', 2)[-2]
+		labels.append(label)
 	
 	#Do some CV
 	from sklearn.cross_validation import StratifiedKFold
@@ -140,13 +147,9 @@ def test_nb():
 	le = TextToId()
 	
 	Y = le.fit_transform(labels)
-	docs = array(docs)
+	X = array(docs)
 	Y = array(Y)
-	inds = range(Y.shape[0])
-	shuffle(inds)
-	docs = docs[inds]
-	Y = Y[inds]
-	cv = StratifiedKFold(Y, shuffle=True)
+	cv = StratifiedKFold(Y)
 	
 	scores = []
 	total_trained = 0
@@ -156,12 +159,13 @@ def test_nb():
 		
 		total_trained += X_train.shape[0]
 		clf = MultinomiamNaiveBayes(0.5, 500000, 0.001)
-		for x, y in zip(X_train, X_train):
+		for x, y in zip(X_train, Y_train):
 			t0 = time()
+#			interact(local=locals())
 			clf.fit(x, y)
 			t1 = time()
 			training_time += t1-t0
-		pred = [clf.predict(x) for x in X_train]
+		pred = [clf.predict(x)[0] for x in X_test]
 		scores.append(f1_score(Y_test, pred, pos_label=None, average='macro'))
 		print scores[-1]
 	scores = array(scores)
@@ -170,6 +174,6 @@ def test_nb():
 	print 'Total trained:', total_trained	
 	print 'Training time:', training_time
 	print 'Done'
-
+	interact(local=locals())
 if __name__ == '__main__':
 	test_nb()
