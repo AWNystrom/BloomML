@@ -1,8 +1,32 @@
+"""
+
+the squashed counts are stored. So the lookup should look like
+
+c = 1
+while c in bf:
+	c+= 1
+return self.decode(c-1)
+
+the increment should look like
+
+def increment(item, by):
+	#Get the current quantized count
+	cur = count(item, decode=True)
+	to = self.encode(cur+by)
+	
+	for i in xrange(cur+1, to+1):
+		bf.add(item+'_'_str(i)) #adding quantized counts
+		
+
+"""
+
+#TODO: quantized and binsearch thresh
+
 #Needs this: https://github.com/jaybaird/python-bloomfilter
 from pybloom import BloomFilter
-
+from random import random
 from time import time
-from math import log
+from math import log, floor
 #Needs https://github.com/axiak/pybloomfiltermmap
 #10X faster!
 #from pybloomfilter import BloomFilter
@@ -10,32 +34,18 @@ from lru_cacher import LruCacher
 
 from code import interact
 
-def log_encoder(base=1.5):
-	return lambda n: int(1.0 + int(log(n, base)))
-def log_decoder(base=1.5):
-	return lambda n: int(round(1.0*(base**n + base**(n-1) - 1) / 2))
-
 class BloomFreqMap:
-	def __init__(self, bloom_size=500000, bloom_error=0.001, cache_size=5000, 
-				 encoder=lambda item: item, decoder=lambda item: item, 
-				 bin_search_lookback=3):
+	def __init__(self, b, bloom_size=500000, bloom_error=0.001, 
+				 cache_size=500, bin_search_lookback=3, quantum_leap=True):
 		"bloom_size: the number of elements that can be stored in the"
 		"    internal bloom filter while keeping the specified error"
 		"    rate."
 		"bloom_error: the max error rate of the bloom filter so long as"
 		"    at most bloom_size are stored."
 		"cache_size: the max size of the internal LRU cache."
-		"encoder: when a count n is stored, we insert 1-n into the"
-		"    bloom filter. This can take up a lot of the bloom filter's"
-		"    space for large n. Instead, we can store a transformed"
-		"    version of n to squash it, reqiring fewer insertions"
-		"    (e.g. 1+int(log_b(n))) and perform an inverse when we read"
-		"    it back out (e.g. (b^j+b^(j+1)-1)/2 where j is the result"
-		"    of the example encoder). The squashing function is the"
-		"    encoder. log_encoder is a good choice. See D Talbot,"
-		"    M Osborne - EMNLP-CoNLL, 2007 for more information."
-		"decoder: see explanation of encoder. decoder is the inverse of"
-		"    the squasher. log_decoder is a good choice."
+		"base: the base of the logarithm used to quantize the counts."
+		"      lower values have cause more precise counting, but have"
+		"      less compression."
 		"bin_search_lookback: when a binary search is performed to find"
 		"    the frequency, don't just ensure that we've found a"
 		"    situation in which mid is in the bloom fliter and mid+1"
@@ -43,28 +53,33 @@ class BloomFreqMap:
 		self.bloom_size = bloom_size
 		self.bloom_error = bloom_error
 		self.bf = BloomFilter(capacity=bloom_size, error_rate=bloom_error)
-		self.encoder = encoder
-		self.decoder = decoder
 		self.cache = LruCacher(cache_size, self.plan_b_count)
+		self.base = b
+		self.adjust = quantum_leap
+		
+		if b is None:
+			self.encode = lambda n: n
+			self.decode = lambda n: n
+		else:
+			self.encode = lambda c: 1.0 + floor(log(c, b))
+			self.decode = lambda q: (b**(q-1) + b**q - 1) / 2
+		
+		
 		
 		#Holds tokens that have at least the threshold number of tokens for which binary 
 		#search is faster than linear scan
 		self.binsearch_bf = BloomFilter(capacity=bloom_size, error_rate=bloom_error)
 		self.bin_search_lookback = bin_search_lookback
 		self.bin_search_cutoff = self.determine_lookup_speed_threshold()
-		print self.bin_search_cutoff
 	
 	def linear_scan_count(self, item):
-		print 'linear searching'
 		bf = self.bf
 		c = 1
 		while item+'_'+str(c) in bf:
 			c += 1
-		c -= 1
-		return self.decoder(c)
+		return c-1
 	
 	def binsearch_count(self, item):
-		print 'binary searching'
 		bf = self.bf
 		if item+'_'+str(1) not in bf:
 			return 0
@@ -93,17 +108,20 @@ class BloomFreqMap:
 		#See if we've reached the threshold for which a binary search lookup becomes faster
 		#If so, use that method. Else use a linear scan.
 		search = self.binsearch_count if item in self.binsearch_bf else self.linear_scan_count
-		return search(item)
+		result = search(item)
+		if result == 0:
+			return 0
+		return result
 		
-	def count(self, item):		
-		result, _ = self.cache.lookup(item)
+	def count(self, item):
+		result, found_in_cache = self.cache.lookup(item)
 		return result
 	
 	def __getitem__(self, item):
-		return self.count(item)
+		return self.decode(self.count(item))
 	
 	def __setitem__(self, item, val):
-		cur_count = self.count(item)
+		cur_count = self.__getitem__(item)
 		if val < cur_count:
 			raise RuntimeWarning("Cannot decrease count of " + item + " from " + \
 								 str(cur_count) + " to " + str(val))
@@ -115,16 +133,27 @@ class BloomFreqMap:
 		Increment the frequency of item by the amount "by" (default 1).
 		"""
 		
-		est_cur_count = self.count(item)
-		new_count = self.encoder(est_cur_count + by)
+		cur_q = self.count(item)
+		new_count = self.decode(cur_q) + by
+		new_q = self.encode(new_count)
+		quant_inc = new_q-cur_q
 		
-		if est_cur_count+by >= self.bin_search_cutoff:
+		for i in xrange(int(cur_q)+1, int(new_q)+1):
+			self.bf.add(item + '_'+ str(i))
+    
+		
+		if self.adjust:
+			actual_new_count = self.__getitem__(item)	#Can you get this without calling this function?
+			p = 1.*(new_count-actual_new_count) / (self.decode(new_q+1) - self.decode(new_q))
+			if random() <= p:
+				new_q += 1
+				self.bf.add(item + '_'+ str(int(new_q)))
+				new_count = self.__getitem__(item)	#Can you get this without calling this function?
+		
+		if new_q >= self.bin_search_cutoff:
 			self.binsearch_bf.add(item)
 		
-		for i in xrange(est_cur_count+1, new_count+1):
-			self.bf.add(item + '_'+ str(i))
-		
-		self.cache.update(item, new_count)
+		self.cache.update(item, new_q)
 				
 	def determine_lookup_speed_threshold(self):
 		from time import time
