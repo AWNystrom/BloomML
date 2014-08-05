@@ -5,21 +5,17 @@ from numpy import inf, log
 from sklearn.metrics import f1_score
 from code import interact
 
-def quant_enc(n):
-	return 1.0 + int(log(n, 0.5))
-	
-def quant_dec(n):
-	return (1.5**n + 1.5**(n-1) - 1)/2
+import sanity_naive_bayes
 	
 class MultinomiamNaiveBayes(object):
-	def __init__(self, alpha, initial_capacity, error_rate, cache_size):
+	def __init__(self, base, alpha, initial_capacity, error_rate, cache_size):
 		self.initial_capacity = initial_capacity
 		self.error_rate = error_rate
 		self.alpha = alpha
+		self.base = base
 		
 		#Tracks count | class for p(x|c)
-		self.class_conditional_counts = BloomFreqMap(initial_capacity, initial_error_rate,
-													 cache_size, quant_enc, quant_dec)
+		self.class_conditional_counts = BloomFreqMap(base)
 		
 		#Tracks count all tokens | class for p(x|c)
 		self.tokens_per_class = {}
@@ -48,7 +44,7 @@ class MultinomiamNaiveBayes(object):
 		#if class_label not in self.class_to_toks_bf:
 		#	self.class_to_toks_bf[class_label] = BloomFilter(capacity=self.initial_capacity, error_rate=self.error_rate)
 		
-		if class_label not in self.class_conditional_counts:
+		if class_label not in self.vocab_sizes:
 			self.vocab_sizes[class_label] = BloomFilter(capacity=self.initial_capacity, error_rate=self.error_rate)
 			
 		self.tokens_per_class[class_label] = self.tokens_per_class.get(class_label, 0) + len(tokens)
@@ -57,7 +53,8 @@ class MultinomiamNaiveBayes(object):
 		for token, token_freq in tok_freqs.iteritems():
 			#self.class_to_toks_bf[class_label].add(token)
 			self.token_type_bf.add(token)
-			conditional_counts_bf[token+'_'+class_label] += token_freq
+			#conditional_counts_bf[token+'_'+class_label] += token_freq
+			self.class_conditional_counts[token+'_'+class_label] += token_freq
 			self.vocab_sizes[class_label].add(token)
 			
 		self.class_freqs[class_label] = self.class_freqs.get(class_label, 0) + 1
@@ -66,7 +63,7 @@ class MultinomiamNaiveBayes(object):
 	def predict(self, tokens, tie_breaker='highest_freq', use_class_prior=True):
 		
 		N = self.N
-		max_class, max_score = None, inf
+		max_class, max_score = None, -inf
 		tok_freqs = self.makeTokenFreqmap(tokens)
 		num_instances = sum((item[1] for item in self.class_freqs.iteritems()))
 		for c, cf in self.class_freqs.iteritems():
@@ -85,7 +82,7 @@ class MultinomiamNaiveBayes(object):
 			#Penalize unseen tokens
 			this_score += num_unseen*(log(self.alpha) - log(theta_denominator))
 			
-			max_score, max_class = min((max_score, max_class), (this_score, c))
+			max_score, max_class = max((max_score, max_class), (this_score, c))
 		
 		return max_class, max_score
 
@@ -159,13 +156,14 @@ def test_nb():
 		
 		total_trained += X_train.shape[0]
 		clf = MultinomiamNaiveBayes(0.5, 500000, 0.001)
+		#clf = sanity_naive_bayes.MNB(0.5)
 		for x, y in zip(X_train, Y_train):
 			t0 = time()
 #			interact(local=locals())
 			clf.fit(x, y)
 			t1 = time()
 			training_time += t1-t0
-		pred = [clf.predict(x)[0] for x in X_test]
+		pred = [clf.bernoulli_predict(x)[0] for x in X_test]
 		scores.append(f1_score(Y_test, pred, pos_label=None, average='macro'))
 		print scores[-1]
 	scores = array(scores)
