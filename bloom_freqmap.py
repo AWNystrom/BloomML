@@ -27,14 +27,44 @@ from pybloom import BloomFilter
 from random import random
 from time import time
 from math import log, floor
+import logging
 #Needs https://github.com/axiak/pybloomfiltermmap
 #10X faster!
 #from pybloomfilter import BloomFilter
 from lru_cacher import LruCacher
-
+from numpy import median, mean
 from code import interact
+from scipy.stats.mstats import mquantiles
 
-class BloomFreqMap:
+class BloomFreqMapSet(object):
+	def __init__(self, num, b, bloom_size=500000, bloom_error=0.001, 
+				 cache_size=500, bin_search_lookback=3, quantum_leap=True):
+		self.num = num
+		self.b = b
+		self.bloom_size = bloom_size
+		self.bloom_error = bloom_error
+		self.cache_size = cache_size
+		self.bin_search_lookback = bin_search_lookback
+		self.quantum_leap = quantum_leap
+		
+		self.bfms = [BloomFreqMap(b, bloom_size, bloom_error, 
+															cache_size, bin_search_lookback, 
+															quantum_leap) for i in xrange(num)]
+															
+	def __getitem__(self, item):
+		counts = [bfm[item] for bfm in self.bfms]
+		return mquantiles(counts, prob=[0.375])[0]
+		
+	def increase_count(self, item, by):
+		for bfm in self.bfms:
+			for i in xrange(int(by)):
+				bfm.increase_count(item, 1.0)
+		
+	def __setitem__(self, item, val):
+		for bfm in self.bfms:
+			bfm.__setitem__(item, val)
+				
+class BloomFreqMap(object):
 	def __init__(self, b, bloom_size=500000, bloom_error=0.001, 
 				 cache_size=500, bin_search_lookback=3, quantum_leap=True):
 		"bloom_size: the number of elements that can be stored in the"
@@ -112,6 +142,10 @@ class BloomFreqMap:
 		if result == 0:
 			return 0
 		return result
+	
+	def increase_count(self, item, by):
+		for i in xrange(int(by)):
+			self.increment(item, 1.0)
 		
 	def count(self, item):
 		result, found_in_cache = self.cache.lookup(item)
@@ -123,8 +157,8 @@ class BloomFreqMap:
 	def __setitem__(self, item, val):
 		cur_count = self.__getitem__(item)
 		if val < cur_count:
-			raise RuntimeWarning("Cannot decrease count of " + item + " from " + \
-								 str(cur_count) + " to " + str(val))
+#			logging.warning("Cannot decrease count of " + item + " from " + \
+#								 str(cur_count) + " to " + str(val))
 			return
 		self.increment(item, val-cur_count)
 		
@@ -134,17 +168,23 @@ class BloomFreqMap:
 		"""
 		
 		cur_q = self.count(item)
-		new_count = self.decode(cur_q) + by
+		cur_count = self.decode(cur_q)
+		new_count = cur_count + by
 		new_q = self.encode(new_count)
 		quant_inc = new_q-cur_q
 		
 		for i in xrange(int(cur_q)+1, int(new_q)+1):
 			self.bf.add(item + '_'+ str(i))
+		self.cache.update(item, new_q) #Not necessary. Just manually calculate it as (b**new_q + b**(new_q-1) - 1) /2
+#		print 'inced by', quant_inc
     
 		
 		if self.adjust:
 			actual_new_count = self.__getitem__(item)	#Can you get this without calling this function?
+#			print 'actual_new_count', actual_new_count
+#			print new_count, actual_new_count, (self.decode(new_q+1) - self.decode(new_q))
 			p = 1.*(new_count-actual_new_count) / (self.decode(new_q+1) - self.decode(new_q))
+#			print 'p', p
 			if random() <= p:
 				new_q += 1
 				self.bf.add(item + '_'+ str(int(new_q)))
