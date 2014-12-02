@@ -17,8 +17,7 @@ class MNB(object):
 		self.n = 0
 		self.c_to_toks_count = defaultdict(lambda:0)
 			
-	def fit(self, tokens, c):
-		freqmap = make_freqmap(tokens)
+	def fit(self, freqmap, c):
 		
 		for t, f in freqmap.iteritems():
 			self.c_tok_to_f[c][t] += f
@@ -28,10 +27,8 @@ class MNB(object):
 		self.c_f[c] += 1
 		self.n += 1
 	
-	def predict(self, tokens):
+	def predict(self, freqmap):
 		best_score_class_pair = (-inf, None)
-		
-		freqmap = make_freqmap(tokens)
 		
 		for c, c_freq in self.c_f.iteritems():
 			score = log(c_freq) - log(self.n)
@@ -41,10 +38,8 @@ class MNB(object):
 			best_score_class_pair = max(best_score_class_pair, (score, c))
 		return (best_score_class_pair[1], best_score_class_pair[0])
 	
-	def bernoulli_predict(self, tokens):
+	def bernoulli_predict(self, freqmap):
 		best_score_class_pair = (-inf, None)
-		
-		freqmap = make_freqmap(tokens)
 		
 		for c, c_freq in self.c_f.iteritems():
 			score = log(c_freq) - log(self.n)
